@@ -69,6 +69,28 @@ class AuthController extends Controller
             'employee' => new EmployeeResource($employee),
         ]);
     }
+    public function crewLogin(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email'    => 'required|email',
+            'password' => 'required|string',
+        ]);
+
+        $employee = Employee::where('email', $request->email)
+            ->whereIn('role', ['Cashier', 'Barista'])
+            ->first();
+
+        if (!$employee || !Hash::check($request->password, $employee->password)) {
+            return response()->json(['message' => 'Invalid credentials'], 401);
+        }
+
+        $token = $employee->createToken('crew-session', ['crew'])->plainTextToken;
+
+        return response()->json([
+            'token'    => $token,
+            'employee' => new EmployeeResource($employee),
+        ]);
+    }
     public function me(Request $request): JsonResponse
     {
         return response()->json(new EmployeeResource($request->user()));

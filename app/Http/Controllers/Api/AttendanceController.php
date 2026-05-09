@@ -5,9 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\TimeLogResource;
 use App\Models\Employee;
+use App\Models\Notification;
+use App\Models\Shift;
 use App\Models\TimeLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class AttendanceController extends Controller
 {
@@ -19,9 +22,9 @@ class AttendanceController extends Controller
         $date = $request->get('date', now()->toDateString());
 
         $logs = TimeLog::with('employee')
-                       ->where('date', $date)
-                       ->orderBy('clock_in')
-                       ->get();
+            ->where('date', $date)
+            ->orderBy('clock_in')
+            ->get();
 
         return response()->json(TimeLogResource::collection($logs));
     }
@@ -36,9 +39,9 @@ class AttendanceController extends Controller
         ]);
 
         $logs = TimeLog::whereBetween('date', [$request->from, $request->to])
-                       ->orderBy('date')
-                       ->orderBy('employee_id')
-                       ->get();
+            ->orderBy('date')
+            ->orderBy('employee_id')
+            ->get();
 
         return response()->json(TimeLogResource::collection($logs));
     }
@@ -60,9 +63,9 @@ class AttendanceController extends Controller
         if ($request->type === 'in') {
             // Prevent duplicate open log
             $exists = TimeLog::where('employee_id', $employee->id)
-                             ->where('date', $today)
-                             ->whereNull('clock_out')
-                             ->exists();
+                ->where('date', $today)
+                ->whereNull('clock_out')
+                ->exists();
 
             if ($exists) {
                 return response()->json(['message' => 'Employee already has an open clock-in today'], 422);
@@ -73,7 +76,7 @@ class AttendanceController extends Controller
                 'date'        => $today,
                 'clock_in'    => $request->time,
                 'clock_out'   => null,
-                'hours_worked'=> 0,
+                'hours_worked' => 0,
                 'overtime'    => 0,
                 'status'      => 'On time',  // manual entries assumed on-time
                 'method'      => 'Manual',
@@ -84,9 +87,9 @@ class AttendanceController extends Controller
 
         // type === 'out'
         $log = TimeLog::where('employee_id', $employee->id)
-                      ->where('date', $today)
-                      ->whereNull('clock_out')
-                      ->first();
+            ->where('date', $today)
+            ->whereNull('clock_out')
+            ->first();
 
         if (!$log) {
             return response()->json(['message' => 'No open clock-in found for today'], 404);
@@ -128,5 +131,204 @@ class AttendanceController extends Controller
     {
         [$h, $m] = explode(':', $time);
         return (int)$h * 60 + (int)$m;
+    }
+
+    public function today(Request $request): JsonResponse
+    {
+        $log = TimeLog::where('employee_id', $request->user()->id)
+            ->where('date', now()->toDateString())
+            ->first();
+
+        return response()->json([
+            'log'        => $log ? new TimeLogResource($log) : null,
+            'isClockedIn' => $log && $log->clock_in && !$log->clock_out,
+        ]);
+    }
+
+
+    public function history(Request $request): JsonResponse
+    {
+        $request->validate([
+            'from' => 'required|date',
+            'to'   => 'required|date|after_or_equal:from',
+        ]);
+
+        $logs = TimeLog::where('employee_id', $request->user()->id)
+            ->whereBetween('date', [$request->from, $request->to])
+            ->orderBy('date', 'desc')
+            ->get();
+
+        return response()->json(TimeLogResource::collection($logs));
+    }
+
+
+    // public function clockIn(Request $request): JsonResponse
+    // {
+    //     $request->validate([
+    //         'deviceId' => 'required|string',
+    //     ]);
+
+    //     $emp   = $request->user();
+    //     $today = now()->toDateString();
+    //     $now   = now()->format('H:i');
+
+
+    //     $shift = Shift::where('employee_id', $emp->id)
+    //         ->where('date', $today)
+    //         ->first();
+
+    //     if (!$shift) {
+    //         return response()->json([
+    //             'message' => 'No assigned shift found for today. You cannot clock in.',
+    //         ], 403);
+    //     }
+
+
+    //     // Prevent duplicate open log
+    //     $existing = TimeLog::where('employee_id', $emp->id)
+    //         ->where('date', $today)
+    //         ->whereNull('clock_out')
+    //         ->first();
+
+    //     if ($existing) {
+    //         return response()->json([
+    //             'message' => 'Already clocked in. Please clock out first.',
+    //             'log'     => new TimeLogResource($existing),
+    //         ], 422);
+    //     }
+
+    //     // Late detection — shift starts at 06:00 (Morning) by default
+    //     // A more complete implementation would check the actual shift record
+    //     $shiftStart    = 6 * 60; // 06:00 in minutes
+    //     $nowMinutes    = (int) now()->format('H') * 60 + (int) now()->format('i');
+    //     $gracePeriod   = 5;      // 5-minute grace period
+    //     $isLate        = $nowMinutes > ($shiftStart + $gracePeriod);
+
+    //     $log = TimeLog::create([
+    //         'employee_id' => $emp->id,
+    //         'date'        => $today,
+    //         'clock_in'    => $now,
+    //         'clock_out'   => null,
+    //         'hours_worked' => 0,
+    //         'overtime'    => 0,
+    //         'status'      => $isLate ? 'Late' : 'On time',
+    //         'method'      => 'QR',
+    //     ]);
+
+    //     // Fire late notification to managers
+    //     if ($isLate) {
+    //         Notification::create([
+    //             'employee_id' => null,
+    //             'type'        => 'late',
+    //             'message'     => "{$emp->first_name} {$emp->last_name} clocked in late at {$now}.",
+    //         ]);
+    //     }
+
+    //     return response()->json([
+    //         'action'  => 'clock_in',
+    //         'message' => "✅ {$emp->first_name} clocked IN — {$now}",
+    //         'log'     => new TimeLogResource($log),
+    //     ], 201);
+    // }
+    // // ── Clock Out ─────────────────────────────────────────────────────────────
+    // // POST /api/employee/attendance/clock-out
+    // // Body: { deviceId }
+    // public function clockOut(Request $request): JsonResponse
+    // {
+
+    //     $emp   = $request->user();
+    //     $today = now()->toDateString();
+    //     $now   = now()->format('H:i');
+
+    //     $log = TimeLog::where('employee_id', $emp->id)
+    //         ->where('date', $today)
+    //         ->whereNull('clock_out')
+    //         ->first();
+
+    //     if (!$log) {
+    //         return response()->json(['message' => 'No open clock-in found for today.'], 404);
+    //     }
+
+    //     // Compute hours and overtime
+    //     [$inH, $inM]   = explode(':', $log->clock_in);
+    //     [$outH, $outM] = explode(':', $now);
+    //     $inMinutes     = (int)$inH  * 60 + (int)$inM;
+    //     $outMinutes    = (int)$outH * 60 + (int)$outM;
+    //     $hoursWorked   = round(($outMinutes - $inMinutes) / 60, 2);
+    //     $overtime      = max(0, round($hoursWorked - 8, 2));
+    //     $status        = $hoursWorked < 8 ? 'Undertime' : $log->status;
+
+    //     $log->update([
+    //         'clock_out'    => $now,
+    //         'hours_worked' => $hoursWorked,
+    //         'overtime'     => $overtime,
+    //         'status'       => $status,
+    //     ]);
+
+    //     return response()->json([
+    //         'action'  => 'clock_out',
+    //         'message' => "✅ {$emp->first_name} clocked OUT — {$hoursWorked}h worked",
+    //         'log'     => new TimeLogResource($log->fresh()),
+    //     ]);
+    // }
+
+
+    public function scan(Request $request): JsonResponse
+    {
+        $request->validate([
+            'deviceId' => 'required|string',
+        ]);
+
+        $emp   = $request->user();
+        $today = now()->toDateString();
+        $now   = now()->format('H:i');
+
+        $existing = TimeLog::where('employee_id', $emp->id)
+            ->where('date', $today)
+            ->whereNull('clock_out')
+            ->first();
+
+        // ── CLOCK OUT ─────────────────────
+        if ($existing) {
+
+            [$inH, $inM]   = explode(':', $existing->clock_in);
+            [$outH, $outM] = explode(':', $now);
+
+            $inMinutes  = ((int)$inH * 60) + (int)$inM;
+            $outMinutes = ((int)$outH * 60) + (int)$outM;
+
+            $hoursWorked = round(($outMinutes - $inMinutes) / 60, 2);
+            $overtime    = max(0, round($hoursWorked - 8, 2));
+
+            $existing->update([
+                'clock_out'    => $now,
+                'hours_worked' => $hoursWorked,
+                'overtime'     => $overtime,
+            ]);
+
+            return response()->json([
+                'action'  => 'clock_out',
+                'message' => "✅ {$emp->first_name} clocked OUT",
+                'log'     => new TimeLogResource($existing->fresh()),
+            ]);
+        }
+
+        // ── CLOCK IN ─────────────────────
+        $log = TimeLog::create([
+            'employee_id' => $emp->id,
+            'date'        => $today,
+            'clock_in'    => $now,
+            'clock_out'   => null,
+            'hours_worked' => 0,
+            'overtime'    => 0,
+            'status'      => 'On time',
+            'method'      => 'QR',
+        ]);
+
+        return response()->json([
+            'action'  => 'clock_in',
+            'message' => "✅ {$emp->first_name} clocked IN",
+            'log'     => new TimeLogResource($log),
+        ]);
     }
 }

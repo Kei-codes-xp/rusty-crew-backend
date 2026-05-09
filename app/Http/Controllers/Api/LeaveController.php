@@ -9,6 +9,7 @@ use App\Models\LeaveRequest;
 use App\Models\Notification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class LeaveController extends Controller
 {
@@ -19,6 +20,7 @@ class LeaveController extends Controller
         $leaves = LeaveRequest::with('employee')
                               ->orderByDesc('created_at')
                               ->get();
+        Log::info('Leave requests retrieved: ' . $leaves->count());
 
         return response()->json(LeaveRequestResource::collection($leaves));
     }

@@ -15,12 +15,13 @@ class LeaveRequest extends Model
         'status',
         'reviewed_by',
         'reviewed_at',
+        'created_at',
     ];
 
     protected $casts = [
         'from'        => 'date:Y-m-d',
         'to'          => 'date:Y-m-d',
-        'reviewed_at' => 'datetime',
+        'created_at'  => 'datetime',
     ];
 
     public function employee()

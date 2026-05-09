@@ -26,7 +26,7 @@ class EmployeeSeeder extends Seeder
             ['Vanjoe',   'Santos',       'vanjoe@rustycrew.ph',   '+63 917 111 2222', '+63 917 999 0000', 'Barista', 85,   false, 0,     'QR001', '0', 5],
             ['Ivy',  'Reyes', 'ivy@rustycrew.ph',  '+63 918 333 4444', '+63 918 888 1111', 'Cashier', 80,   false, 0,     'QR002', '1', 5],
             ['Keisuke', 'Karishuku','kei@rustycrew.ph', '+63 919 555 6666', '+63 919 777 2222', 'Manager', 120,  true,  35000, 'QR003', '2', 7],
-            ['Bernadeth',  'DeJesus',     'berna@rustycrew.ph',  '+63 920 777 8888', '+63 920 666 3333', 'Barista', 85,   false, 0,     'QR004', '3', 4],
+            ['Bernadeth',  'DeJesus',     'berna@rustycrew.ph',  '+63 920 777 8888', '+63 920 666 3333', 'Barista', 85,   false, 0,     'QR004', '3', 4,],
             ['Kyla',  'Santos',    'kyla@rustycrew.ph',  '+63 921 999 0000', '+63 921 555 4444', 'Cashier', 80,   false, 0,     'QR005', '4', 6],
             ['Ben',   'Mercado',   'ben@rustycrew.ph',   '+63 922 111 3333', '+63 922 444 5555', 'Barista', 85,   false, 0,     'QR006', '5', 5],
             ['Luz',   'Bautista',  'luz@rustycrew.ph',   '+63 923 444 5555', '+63 923 333 6666', 'Cashier', 80,   false, 0,     'QR007', '6', 3],
@@ -48,7 +48,7 @@ class EmployeeSeeder extends Seeder
                 'is_salaried'       => $salaried,
                 'monthly_salary'    => $monthly,
                 'pin'               => Hash::make('1234'),      // default PIN for all
-                'password'          => $role === 'Manager' ? Hash::make('password') : null,
+                'password'          => $role === 'Manager' || $email === 'berna@rustycrew.ph' ? Hash::make('password') : null,
                 'qr_token'          => Str::random(64),                    
                 'leave_balance'     => $leave,
                 'avatar_color'      => $color,                  // must match frontend avatarColor
