@@ -34,6 +34,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // ── ADD THIS: prune expired kiosk tokens every 5 minutes ──────────
         $schedule->command('kiosk:prune')->everyFiveMinutes();
     })
+    ->withProviders([
+        \App\Providers\PayrollServiceProvider::class,
+    ])
     ->withExceptions(function ($exceptions) {
         $exceptions->render(function (AuthenticationException $e, Request $request) {
             return response()->json([

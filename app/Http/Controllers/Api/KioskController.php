@@ -20,8 +20,12 @@ class KioskController extends Controller
 
     // ── Avatar color palette (mirrors frontend nameColor()) ──────────────────
     private const AVATAR_COLORS = [
-        '#3d5a2b', '#2b3d5a', '#5a3d2b',
-        '#3d2b5a', '#5a2b3d', '#2b5a3d',
+        '#3d5a2b',
+        '#2b3d5a',
+        '#5a3d2b',
+        '#3d2b5a',
+        '#5a2b3d',
+        '#2b5a3d',
     ];
 
     // =========================================================================
@@ -36,8 +40,8 @@ class KioskController extends Controller
 
         // Clean up expired tokens for this device (housekeeping)
         KioskToken::where('kiosk_device_id', $deviceId)
-                  ->where('expires_at', '<', now()->subMinutes(5))
-                  ->delete();
+            ->where('expires_at', '<', now()->subMinutes(5))
+            ->delete();
 
         // Issue new token
         $token     = Str::random(48);
@@ -94,8 +98,8 @@ class KioskController extends Controller
 
         // ── 1. Look up the token ──────────────────────────────────────────────
         $kioskToken = KioskToken::where('token', $request->token)
-                                ->where('kiosk_device_id', $request->kiosk)
-                                ->first();
+            ->where('kiosk_device_id', $request->kiosk)
+            ->first();
 
         if (!$kioskToken) {
             return $this->scanError('Invalid QR token', 401);
@@ -136,9 +140,9 @@ class KioskController extends Controller
         $nowTime  = now()->format('H:i');
 
         $existingLog = TimeLog::where('employee_id', $employee->id)
-                              ->where('date', $today)
-                              ->whereNull('clock_out')
-                              ->first();
+            ->where('date', $today)
+            ->whereNull('clock_out')
+            ->first();
 
         if ($existingLog) {
             // ── Clock OUT ─────────────────────────────────────────────────────
@@ -157,7 +161,6 @@ class KioskController extends Controller
 
             $action        = 'clock_out';
             $formattedTime = now()->format('g:i A');
-
         } else {
             // ── Clock IN ──────────────────────────────────────────────────────
             $shiftStartMins = 6 * 60;
@@ -195,9 +198,7 @@ class KioskController extends Controller
         ]);
 
         // ── 8. Write scan result for kiosk feed polling ───────────────────────
-        $avatarColor = self::AVATAR_COLORS[
-            array_sum(array_map('ord', str_split($employee->first_name))) % count(self::AVATAR_COLORS)
-        ];
+        $avatarColor = self::AVATAR_COLORS[array_sum(array_map('ord', str_split($employee->first_name))) % count(self::AVATAR_COLORS)];
 
         $scanResult = KioskScanResult::create([
             'token'           => $request->token,
@@ -233,18 +234,25 @@ class KioskController extends Controller
         $deviceId = $request->header('X-Kiosk-Device', 'unknown');
 
         $scans = KioskScanResult::where('kiosk_device_id', $deviceId)
-                                ->where('scanned_at', '>=', now()->subHour())
-                                ->orderByDesc('scanned_at')
-                                ->limit(8)
-                                ->get()
-                                ->map(fn ($s) => [
-                                    // Maps to frontend ScanResult interface
-                                    'id'           => (string) $s->id,
-                                    'employeeName' => $s->employee_name,
-                                    'action'       => $s->action,
-                                    'time'         => $s->formatted_time,
-                                    'avatarColor'  => $s->avatar_color,
-                                ]);
+            ->where('scanned_at', '>=', now()->subHour())
+            ->orderByDesc('scanned_at')
+            ->limit(8)
+            ->get()
+            ->map(fn($s) => [
+                // Maps to frontend ScanResult interface
+                'id'           => (string) $s->id,
+                'employeeName' => $s->employee_name,
+                'action'       => $s->action,
+                'time'         => $s->formatted_time,
+                'avatarColor'  => $s->avatar_color,
+            ]);
+
+        // Log::info('SCAN RECEIVED', [
+        //     'token' => $request->token,
+        //     'url' => request()->fullUrl(),
+        //     'ip' => request()->ip(),
+        //     'user_agent' => request()->userAgent(),
+        // ]);
 
         return response()->json($scans);
     }

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Support\Facades\Storage;
 
 class Employee extends Authenticatable
 {
@@ -27,10 +28,12 @@ class Employee extends Authenticatable
         'qr_token',
         'leave_balance',
         'avatar_color',
+        'avatar_url',
+
     ];
 
 
-    protected $hidden = ['pin', 'password', 'qr_token', 'deleted_at'];
+    protected $hidden = ['pin', 'password', 'qr_token', 'deleted_at', 'avatar_url',];
 
     protected $casts = [
         'hourly_rate'    => 'decimal:2',
@@ -69,14 +72,19 @@ class Employee extends Authenticatable
         return $this->hasMany(Notification::class);
     }
 
+    public function getAvatarUrlAttribute(): ?string
+    {
+        $path = $this->attributes['avatar_url'] ?? null;
+        if (!$path) return null;
+        if (str_starts_with($path, 'http')) return $path;
+        return Storage::url($path); // generates /storage/avatars/xxxx.jpg
+    }
 
-    // public function getFullNameAttribute(): string
-    // {
-    //     return "{$this->first_name} {$this->last_name}";
-    // }
- 
-    // public function isManager(): bool
-    // {
-    //     return in_array($this->role, ['Manager', 'Admin']);
-    // }
+    public function getFullNameAttribute(): string
+    {
+        return "{$this->first_name} {$this->last_name}";
+    }
+
+
+
 }

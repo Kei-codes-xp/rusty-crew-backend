@@ -14,7 +14,7 @@ class EmployeeResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-         return [
+        return [
             'id'            => $this->id,
             'firstName'     => $this->first_name,
             'lastName'      => $this->last_name,
@@ -28,6 +28,11 @@ class EmployeeResource extends JsonResource
             'monthlySalary' => (float) $this->monthly_salary,
             'leaveBalance'  => (int)   $this->leave_balance,
             'avatarColor'   => $this->avatar_color,
+            'avatarUrl'     => $this->avatar_url,   
+            'displayName'   => $this->display_name,
+            'nickname'      => $this->nickname,
+            'bio'           => $this->bio,
+            'themeColor'    => $this->theme_color,
         ];
     }
 }

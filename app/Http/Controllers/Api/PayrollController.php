@@ -3,103 +3,205 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Resources\EmployeeResource;
+use App\Http\Resources\PayrollEntryResource;
+use App\Http\Resources\PayrollPeriodResource;
 use App\Models\Employee;
-use App\Models\TimeLog;
+use App\Models\PayrollEntry;
+use App\Models\PayrollPeriod;
+use App\Services\PayrollService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 
+/**
+ * Admin/Manager payroll controller.
+ *
+ * All computation is delegated to PayrollService.
+ * This controller only handles HTTP concerns: validation, auth, response.
+ *
+ * Endpoints:
+ *   POST   /api/payroll/generate               → generate a new payroll period
+ *   GET    /api/payroll/periods                → list all periods (paginated)
+ *   GET    /api/payroll/periods/{period}       → single period detail
+ *   PATCH  /api/payroll/periods/{period}/lock  → lock a draft period
+ *   PATCH  /api/payroll/periods/{period}/void  → void a draft period
+ *   GET    /api/payroll/{period}/entries       → all entries for a period
+ *   GET    /api/payroll/payslip/{employee}/{period} → single employee payslip
+ *   GET    /api/payroll/payslip/{employee}/{period}/pdf → download PDF
+ */
 class PayrollController extends Controller
 {
-    // GET /api/payroll/weekly?from=YYYY-MM-DD&to=YYYY-MM-DD
-    // Returns payroll data per employee.
-    // Mirrors frontend computePayroll(emp, totalHours, otHours):
-    //   base  = isSalaried ? monthlySalary : totalHours * hourlyRate
-    //   otPay = otHours * hourlyRate * 1.25
-    //   gross = base + otPay
-    public function weekly(Request $request): JsonResponse
+    public function __construct(private PayrollService $service) {}
+
+    // =========================================================================
+    // POST /api/payroll/generate
+    // Body: { startDate, endDate, frequency, notes? }
+    // =========================================================================
+    public function generate(Request $request): JsonResponse
     {
-        $request->validate([
-            'from' => 'required|date',
-            'to'   => 'required|date|after_or_equal:from',
+        $data = $request->validate([
+            'startDate' => 'required|date',
+            'endDate'   => 'required|date|after_or_equal:startDate',
+            'frequency' => 'required|in:weekly,semi_monthly,monthly',
+            'notes'     => 'nullable|string|max:500',
         ]);
 
-        $employees = Employee::where('status', 'Active')
-                             ->orderBy('first_name')
-                             ->get();
+        try {
+            $period = $this->service->generate(
+                startDate:   $data['startDate'],
+                endDate:     $data['endDate'],
+                frequency:   $data['frequency'],
+                generatedBy: $request->user()->id,
+                notes:       $data['notes'] ?? null,
+            );
 
-        $result = $employees->map(function (Employee $emp) use ($request) {
-            $logs = TimeLog::where('employee_id', $emp->id)
-                           ->whereBetween('date', [$request->from, $request->to])
-                           ->get();
+            return response()->json([
+                'message' => 'Payroll generated successfully.',
+                'period'  => new PayrollPeriodResource($period),
+                'entries' => PayrollEntryResource::collection($period->entries),
+            ], 201);
 
-            $totalHours = (float) $logs->sum('hours_worked');
-            $otHours    = (float) $logs->sum('overtime');
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
 
-            // Mirrors computePayroll() in utils/employee.ts
-            $base  = $emp->is_salaried ? (float)$emp->monthly_salary : $totalHours * (float)$emp->hourly_rate;
-            $otPay = $otHours * (float)$emp->hourly_rate * 1.25;
-            $gross = $base + $otPay;
+    // =========================================================================
+    // GET /api/payroll/periods
+    // Query: ?frequency=weekly&status=draft&page=1
+    // =========================================================================
+    public function periods(Request $request): JsonResponse
+    {
+        $query = PayrollPeriod::orderByDesc('start_date');
 
-            return [
-                'id'           => $emp->id,
-                'firstName'    => $emp->first_name,
-                'lastName'     => $emp->last_name,
-                'role'         => $emp->role,
-                'hourlyRate'   => (float) $emp->hourly_rate,
-                'isSalaried'   => (bool)  $emp->is_salaried,
-                'monthlySalary'=> (float) $emp->monthly_salary,
-                'totalHours'   => round($totalHours, 2),
-                'otHours'      => round($otHours,    2),
-                'base'         => round($base,   2),
-                'otPay'        => round($otPay,  2),
-                'gross'        => round($gross,  2),
-                // Per-day breakdown so frontend can render daily columns
-                'logs'         => $logs->map(fn ($l) => [
-                    'date'        => $l->date->format('Y-m-d'),
-                    'hoursWorked' => (float) $l->hours_worked,
-                    'overtime'    => (float) $l->overtime,
-                    'status'      => $l->status,
-                ]),
-            ];
-        });
+        if ($request->filled('frequency')) {
+            $query->where('frequency', $request->frequency);
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        $periods = $query->paginate(15);
 
         return response()->json([
-            'from'        => $request->from,
-            'to'          => $request->to,
-            'employees'   => $result,
-            'totalGross'  => round($result->sum('gross'),      2),
-            'totalHours'  => round($result->sum('totalHours'), 2),
-            'totalOT'     => round($result->sum('otHours'),    2),
+            'data' => PayrollPeriodResource::collection($periods->items()),
+            'meta' => [
+                'total'        => $periods->total(),
+                'per_page'     => $periods->perPage(),
+                'current_page' => $periods->currentPage(),
+                'last_page'    => $periods->lastPage(),
+            ],
         ]);
     }
 
-    // GET /api/payroll/payslip/{id}?from=YYYY-MM-DD&to=YYYY-MM-DD
-    // Returns payslip data for a single employee (the "View Payslip" modal)
-    public function payslip(Request $request, Employee $employee): JsonResponse
+    // =========================================================================
+    // GET /api/payroll/periods/{period}
+    // =========================================================================
+    public function showPeriod(PayrollPeriod $period): JsonResponse
     {
-        $request->validate([
-            'from' => 'required|date',
-            'to'   => 'required|date|after_or_equal:from',
-        ]);
+        Log::info(''. $period);
+        return response()->json(new PayrollPeriodResource($period));
+    }
 
-        $logs = TimeLog::where('employee_id', $employee->id)
-                       ->whereBetween('date', [$request->from, $request->to])
-                       ->get();
+    // =========================================================================
+    // PATCH /api/payroll/periods/{period}/lock
+    // =========================================================================
+    public function lock(Request $request, PayrollPeriod $period): JsonResponse
+    {
+        try {
+            $locked = $this->service->lock($period, $request->user()->id);
+            return response()->json([
+                'message' => 'Payroll period locked successfully.',
+                'period'  => new PayrollPeriodResource($locked),
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
 
-        $totalHours = (float) $logs->sum('hours_worked');
-        $otHours    = (float) $logs->sum('overtime');
-        $base       = $employee->is_salaried ? (float)$employee->monthly_salary : $totalHours * (float)$employee->hourly_rate;
-        $otPay      = $otHours * (float)$employee->hourly_rate * 1.25;
+    // =========================================================================
+    // PATCH /api/payroll/periods/{period}/void
+    // =========================================================================
+    public function void(Request $request, PayrollPeriod $period): JsonResponse
+    {
+        try {
+            $voided = $this->service->void($period, $request->user()->id);
+            return response()->json([
+                'message' => 'Payroll period voided.',
+                'period'  => new PayrollPeriodResource($voided),
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    // =========================================================================
+    // GET /api/payroll/{period}/entries
+    // Returns all PayrollEntry rows for the given period.
+    // =========================================================================
+    public function entries(PayrollPeriod $period): JsonResponse
+    {
+        $entries = $period->entries()
+                          ->orderBy('employee_first_name')
+                          ->get();
 
         return response()->json([
-            'employee'    => new EmployeeResource($employee),
-            'period'      => ['from' => $request->from, 'to' => $request->to],
-            'totalHours'  => round($totalHours, 2),
-            'otHours'     => round($otHours,    2),
-            'base'        => round($base,   2),
-            'otPay'       => round($otPay,  2),
-            'gross'       => round($base + $otPay, 2),
+            'period'  => new PayrollPeriodResource($period),
+            'entries' => PayrollEntryResource::collection($entries),
         ]);
     }
+
+    // =========================================================================
+    // GET /api/payroll/payslip/{employee}/{period}
+    // Returns the frozen payslip for one employee in one period.
+    // =========================================================================
+    public function payslip(Employee $employee, PayrollPeriod $period): JsonResponse
+    {
+        $entry = $this->service->getEntry($period->id, $employee->id);
+
+        if (!$entry) {
+            return response()->json([
+                'message' => "No payroll entry found for this employee in period #{$period->id}.",
+            ], 404);
+        }
+
+        return response()->json([
+            'period' => new PayrollPeriodResource($period),
+            'entry'  => new PayrollEntryResource($entry),
+        ]);
+    }
+
+    // =========================================================================
+    // GET /api/payroll/payslip/{employee}/{period}/pdf
+    // Returns a downloadable payslip.
+    // Install: composer require barryvdh/laravel-dompdf
+    // =========================================================================
+    public function payslipPdf(Employee $employee, PayrollPeriod $period)
+    {
+        $entry = $this->service->getEntry($period->id, $employee->id);
+
+        if (!$entry) {
+            return response()->json(['message' => 'Payslip not found.'], 404);
+        }
+
+        $html = view('payslip', [
+            'period' => $period,
+            'entry'  => $entry,
+        ])->render();
+
+        $filename = "payslip_{$employee->id}_{$period->start_date}_{$period->end_date}.html";
+
+        // Swap this block for DomPDF in production:
+        // return \PDF::loadHTML($html)->download($filename . '.pdf');
+
+        return response($html, 200, [
+            'Content-Type'        => 'text/html',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+        ]);
+    }
+
+
+    
 }

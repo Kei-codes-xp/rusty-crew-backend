@@ -7,14 +7,17 @@ use App\Http\Controllers\Api\{
     DashboardController,
     EmployeeController,
     EmployeeNotificationController,
+    EmployeePayrollController,
     KioskController,
     LeaveController,
     NotificationController,
     PayrollController,
+    ProfileController,
     ShiftController,
     ScheduleController,
-
 };
+
+
 use Illuminate\Http\Request;
 
 
@@ -59,8 +62,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/shifts/swaps/{swap}/approve',   [ShiftController::class, 'swapApprove']);
     Route::patch('/shifts/swaps/{swap}/deny',      [ShiftController::class, 'swapDeny']);
 
-    Route::get('/payroll/weekly',               [PayrollController::class, 'weekly']);
-    Route::get('/payroll/payslip/{employee}',   [PayrollController::class, 'payslip']);
 
     Route::get('/leaves',                        [LeaveController::class, 'index']);
     Route::post('/leaves',                       [LeaveController::class, 'store']);
@@ -101,4 +102,96 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/crew/read-all',            [EmployeeNotificationController::class, 'markAllRead']);
         Route::patch('/crew/{notification}/read', [EmployeeNotificationController::class, 'markRead']);
     });
+
+    Route::get('/profile',          [ProfileController::class, 'show']);
+    Route::patch('/profile',          [ProfileController::class, 'update']);
+    Route::patch('/profile/password', [ProfileController::class, 'changePassword']);
+    Route::post('/profile/avatar',   [ProfileController::class, 'uploadAvatar']);
+    Route::delete('/profile/avatar',   [ProfileController::class, 'removeAvatar']);
 });
+Route::middleware(['kiosk.device'])
+     ->prefix('kiosk')
+     ->group(function () {
+ 
+    // ── Public kiosk endpoints (no user auth) ──────────────────────────────
+ 
+    // GET /api/kiosk/qr
+    // Kiosk frontend polls this every 30 s to get a fresh signed token.
+    // Returns: { token, signature, expires_at, issued_at, kiosk_id }
+    // Maps to: useKioskQR.fetchQR()
+    Route::get('/qr', [KioskController::class, 'generateQR']);
+ 
+    // GET /api/kiosk/scans?token={currentToken}
+    // Kiosk polls this every 4 s to populate the live feed panel.
+    // Returns: ScanResult[] (last 8 scans from the past hour)
+    // Maps to: useKioskQR.pollScans()
+    Route::get('/scans', [KioskController::class, 'recentScans']);
+ 
+    // ── Authenticated scan endpoint (employee mobile app) ──────────────────
+ 
+    // POST /api/kiosk/scan
+    // Called by the employee's authenticated mobile app after QR scan.
+    // Requires: Authorization: Bearer {employee_sanctum_token}
+    // Body: { token, signature, exp, kiosk, deviceId }
+    // Returns: { success, action, message, employeeName, time, scanId }
+    Route::middleware('auth:sanctum')
+         ->post('/scan', [KioskController::class, 'processScan']);
+});
+
+
+Route::middleware(['auth:sanctum'])
+     ->prefix('payroll')
+     ->group(function () {
+ 
+    // POST /api/payroll/generate
+    // Generate (or regenerate) a payroll period.
+    // Body: { startDate, endDate, frequency, notes? }
+    // Returns: { message, period, entries[] }
+    Route::post('/generate', [PayrollController::class, 'generate']);
+ 
+    // GET /api/payroll/periods
+    // List all payroll periods, paginated.
+    // Query: ?frequency=weekly&status=draft
+    Route::get('/periods', [PayrollController::class, 'periods']);
+ 
+    // GET /api/payroll/periods/{period}
+    // Single period detail (no entries).
+    Route::get('/periods/{period}', [PayrollController::class, 'showPeriod']);
+ 
+    // PATCH /api/payroll/periods/{period}/lock
+    // Lock a draft period — makes it immutable.
+    Route::patch('/periods/{period}/lock', [PayrollController::class, 'lock']);
+ 
+    // PATCH /api/payroll/periods/{period}/void
+    // Void a draft period — soft-cancel.
+    Route::patch('/periods/{period}/void', [PayrollController::class, 'void']);
+ 
+    // GET /api/payroll/{period}/entries
+    // All PayrollEntry rows for a period (full breakdown per employee).
+    Route::get('/{period}/entries', [PayrollController::class, 'entries']);
+ 
+    // GET /api/payroll/payslip/{employee}/{period}
+    // Frozen payslip for one employee in one period.
+    // IMPORTANT: declare before /{period}/entries to avoid route conflict
+    Route::get('/payslip/{employee}/{period}',      [PayrollController::class, 'payslip']); 
+    Route::get('/payslip/{employee}/{period}/pdf',  [PayrollController::class, 'payslipPdf']);
+
+});
+
+
+Route::middleware(['auth:sanctum'])
+    ->prefix('employee/payroll')
+    ->group(function () {
+
+        // GET /api/employee/payroll/periods
+        Route::get('/periods', [EmployeePayrollController::class, 'periods']);
+
+        // GET /api/employee/payroll/{period}
+        Route::get('/{period}', [EmployeePayrollController::class, 'show']);
+
+        // GET /api/employee/payroll/{period}/payslip
+        Route::get('/{period}/payslip', [EmployeePayrollController::class, 'payslip']);
+
+        // GET /api/employee/payroll/{period}/pdf
+        Route::get('/{period}/pdf', [EmployeePayrollController::class, 'pdf']);
+    });
